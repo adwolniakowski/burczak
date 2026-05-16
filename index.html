@@ -2,12 +2,9 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Burczak Map</title>
+  <title>Mapa głosowania</title>
 
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
     html, body, #map {
@@ -16,14 +13,47 @@
     }
 
     .trail-label {
-  font-weight: bold;
-  font-size: 12px;
-  background: rgba(255,255,255,0.85);
-  border: 1px solid #666;
-  border-radius: 4px;
-  padding: 2px 4px;
-  box-shadow: 0 0 3px rgba(0,0,0,0.3);
-}
+      font-weight: bold;
+      font-size: 12px;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid #666;
+      border-radius: 4px;
+      padding: 2px 4px;
+    }
+
+    .panel {
+      background: white;
+      padding: 10px;
+      border-radius: 6px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.3);
+      font-family: sans-serif;
+      font-size: 13px;
+      min-width: 210px;
+    }
+
+    .legend-item {
+      margin: 4px 0;
+    }
+
+    .box {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    button {
+      margin-top: 4px;
+      width: 100%;
+      padding: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .active-filter {
+      outline: 3px solid #333;
+    }
   </style>
 </head>
 
@@ -33,155 +63,316 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
+    const GEOJSON_FILE = 'bufory.geojson';
+    const MAIL_TO = 'twoj-email@example.com';
 
     const map = L.map('map').setView([53.2, 23.3], 11);
 
-    L.tileLayer(
-      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors'
-      }
-    ).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
 
-    fetch('burczak.geojson')
-      .then(response => response.json())
-      .then(data => {
+    const votes = {};
+    const layersById = {};
+    let currentFilter = 'all';
 
-        const layer = L.geoJSON(data, {
+    const voteColors = {
+      yes: '#2ca25f',
+      no: '#de2d26',
+      neutral: '#777777'
+    };
 
-          style: feature => {
+    function getFeatureId(feature) {
+      return (
+        feature.properties.id ||
+        feature.properties.fid ||
+        feature.properties.name ||
+        crypto.randomUUID()
+      );
+    }
 
-            const colors = [
-              '#e41a1c',
-              '#377eb8',
-              '#4daf4a',
-              '#984ea3',
-              '#ff7f00',
-              '#a65628',
-              '#f781bf',
-              '#999999',
-              '#66c2a5',
-              '#fc8d62'
-            ];
+    function getStyle(vote) {
+      return {
+        color: voteColors[vote],
+        fillColor: voteColors[vote],
+        weight: 2,
+        fillOpacity: vote === 'neutral' ? 0.25 : 0.45
+      };
+    }
 
-            const name = feature.properties.name || 'default';
+    function formatLength(value) {
+      const n = Number(value || 0);
+      return n ? (n / 1000).toFixed(3) + ' km' : 'brak danych';
+    }
 
-            let hash = 0;
+    function formatArea(value) {
+      const n = Number(value || 0);
+      return n ? (n / 10000).toFixed(2) + ' ha' : 'brak danych';
+    }
 
-            for (let i = 0; i < name.length; i++) {
-              hash = name.charCodeAt(i) + ((hash << 5) - hash);
-            }
+    function updateVisibility() {
+      Object.entries(layersById).forEach(([id, layer]) => {
+        const vote = votes[id];
 
-            const color =
-              colors[Math.abs(hash) % colors.length];
+        let visible = true;
 
-            return {
-              color: color,
-              fillColor: color,
-              weight: 2,
-              fillOpacity: 0.35
-            };
-          },
+        if (currentFilter === 'yes') visible = vote === 'yes';
+        if (currentFilter === 'no') visible = vote === 'no';
+        if (currentFilter === 'neutral') visible = vote === 'neutral';
 
-          onEachFeature: (feature, layer) => {
+        if (visible) {
+          if (!map.hasLayer(layer)) layer.addTo(map);
+        } else {
+          if (map.hasLayer(layer)) map.removeLayer(layer);
+        }
+      });
+    }
 
-  const p = feature.properties;
+    function updateSummary() {
+      const totals = {
+        yes: 0,
+        no: 0,
+        neutral: 0
+      };
 
-  const name =
-    p.name || 'Unnamed';
+      Object.entries(votes).forEach(([id, vote]) => {
+        const layer = layersById[id];
+        if (!layer) return;
 
-  const length =
-    p.length
-      ? (Number(p.length) / 1000).toFixed(3) + ' km'
-      : 'n/a';
-
-  const area =
-    p.area
-      ? (Number(p.area) / 10000).toFixed(2) + ' ha'
-      : 'n/a';
-
-  const color =
-    layer.options.color || '#000';
-
-  const nameLabel = `
-  <div style="color:${color}">
-    <b>${name}</b>
-  </div>
-`;
-
-const popupLabel = `
-  <div style="color:${color}">
-    <b>${name}</b><br>
-    Length: ${length}<br>
-    Area: ${area}
-  </div>
-`;
-
-const tooltip = layer.bindTooltip(nameLabel, {
-  permanent: true,
-  direction: 'center',
-  className: 'trail-label'
-});
-
-layer.bindPopup(popupLabel);
-
-  // original style backup
-  const originalStyle = {
-    weight: 2,
-    fillOpacity: 0.35
-  };
-
-  // feature hover
-  layer.on('mouseover', () => {
-    layer.setStyle({
-      weight: 5,
-      fillOpacity: 0.6
-    });
-
-    layer.bringToFront();
-  });
-
-  layer.on('mouseout', () => {
-    layer.setStyle(originalStyle);
-  });
-
-  // tooltip hover highlight
-  tooltip.on('add', () => {
-
-    const el = tooltip.getElement();
-
-    if (!el) return;
-
-    el.addEventListener('mouseenter', () => {
-      layer.setStyle({
-        weight: 5,
-        fillOpacity: 0.6
+        const area = Number(layer.feature.properties.area_m2 || 0);
+        totals[vote] += area;
       });
 
-      layer.bringToFront();
-    });
+      document.getElementById('summary-yes').textContent =
+        (totals.yes / 10000).toFixed(2) + ' ha';
 
-    el.addEventListener('mouseleave', () => {
-      layer.setStyle(originalStyle);
-    });
-  });
-}
+      document.getElementById('summary-no').textContent =
+        (totals.no / 10000).toFixed(2) + ' ha';
 
+      document.getElementById('summary-neutral').textContent =
+        (totals.neutral / 10000).toFixed(2) + ' ha';
+    }
+
+    function setVote(id, vote) {
+      votes[id] = vote;
+
+      const layer = layersById[id];
+      if (layer) layer.setStyle(getStyle(vote));
+
+      updateVisibility();
+      updateSummary();
+    }
+
+    function clearVotes() {
+      Object.keys(votes).forEach(id => {
+        votes[id] = 'neutral';
+
+        const layer = layersById[id];
+        if (layer) layer.setStyle(getStyle('neutral'));
+      });
+
+      updateVisibility();
+      updateSummary();
+    }
+
+    function setFilter(filter) {
+      currentFilter = filter;
+
+      document
+        .querySelectorAll('.filter-button')
+        .forEach(btn => btn.classList.remove('active-filter'));
+
+      const active = document.getElementById('filter-' + filter);
+      if (active) active.classList.add('active-filter');
+
+      updateVisibility();
+    }
+
+    function buildVotesJson() {
+      const result = [];
+
+      Object.entries(votes).forEach(([id, vote]) => {
+        const layer = layersById[id];
+        if (!layer) return;
+
+        const p = layer.feature.properties;
+
+        result.push({
+          id: id,
+          name: p.name || id,
+          vote: vote,
+          length_m: Number(p.length || 0),
+          area_m2: Number(p.area_m2 || 0)
+        });
+      });
+
+      return JSON.stringify(result, null, 2);
+    }
+
+    function sendVotesByMail() {
+      const subject = encodeURIComponent('Głosy dla tras');
+      const body = encodeURIComponent(buildVotesJson());
+
+      window.location.href =
+        `mailto:${MAIL_TO}?subject=${subject}&body=${body}`;
+    }
+
+    fetch(GEOJSON_FILE)
+      .then(response => response.json())
+      .then(data => {
+        const geoLayer = L.geoJSON(data, {
+          style: feature => getStyle('neutral'),
+
+          onEachFeature: (feature, layer) => {
+            const p = feature.properties;
+            const id = getFeatureId(feature);
+
+            votes[id] = 'neutral';
+            layersById[id] = layer;
+
+            const name = p.name || 'Bez nazwy';
+            const length = formatLength(p.length);
+            const area = formatArea(p.area_m2);
+
+            const tooltipLabel = `
+              <b>${name}</b><br>
+              Długość: ${length}<br>
+              Powierzchnia: ${area}
+            `;
+
+            const popup = `
+              <b>${name}</b><br>
+              Długość: ${length}<br>
+              Powierzchnia: ${area}<br><br>
+
+              <b>Głos:</b><br>
+
+              <button onclick="setVote('${id}', 'yes')">TAK</button>
+              <button onclick="setVote('${id}', 'neutral')">NEUTRALNIE</button>
+              <button onclick="setVote('${id}', 'no')">NIE</button>
+            `;
+
+            layer.bindTooltip(tooltipLabel, {
+              permanent: true,
+              direction: 'center',
+              className: 'trail-label'
+            });
+
+            layer.bindPopup(popup);
+
+            layer.on('mouseover', () => {
+              layer.setStyle({
+                weight: 5,
+                fillOpacity: 0.65
+              });
+              layer.bringToFront();
+            });
+
+            layer.on('mouseout', () => {
+              layer.setStyle(getStyle(votes[id]));
+            });
+          }
         }).addTo(map);
 
-        const bounds = layer.getBounds();
+        const bounds = geoLayer.getBounds();
 
         if (bounds.isValid()) {
           map.fitBounds(bounds);
-        } else {
-          console.error(
-            'Invalid bounds. Export GeoJSON as EPSG:4326.'
-          );
         }
 
+        updateSummary();
       });
 
+    const legend = L.control({ position: 'bottomright' });
+
+    legend.onAdd = function () {
+      const div = L.DomUtil.create('div', 'panel');
+
+      div.innerHTML = `
+        <b>Legenda</b>
+
+        <div class="legend-item">
+          <span class="box" style="background:${voteColors.yes}"></span>
+          TAK
+        </div>
+
+        <div class="legend-item">
+          <span class="box" style="background:${voteColors.no}"></span>
+          NIE
+        </div>
+
+        <div class="legend-item">
+          <span class="box" style="background:${voteColors.neutral}"></span>
+          NEUTRALNIE
+        </div>
+      `;
+
+      return div;
+    };
+
+    legend.addTo(map);
+
+    const filterPanel = L.control({ position: 'topright' });
+
+    filterPanel.onAdd = function () {
+      const div = L.DomUtil.create('div', 'panel');
+
+      div.innerHTML = `
+        <b>Instrukcja</b><br><br>
+
+        <div style="font-size:12px; line-height:1.4; margin-bottom:10px;">
+          Kliknij obszar, aby oddać głos.
+          <br><br>
+          <b>TAK</b> — obszar odpowiedni<br>
+          <b>NIE</b> — obszar nieodpowiedni<br>
+          <b>NEUTRALNIE</b> — brak decyzji
+          <br><br>
+          Użyj filtrów, aby wyświetlić tylko wybrane głosy.
+        </div>
+
+        <hr>
+
+        <b>Filtry</b><br>
+
+        <button id="filter-all" class="filter-button active-filter" onclick="setFilter('all')">
+          Pokaż wszystkie
+        </button>
+
+        <button id="filter-yes" class="filter-button" onclick="setFilter('yes')">
+          Pokaż tylko TAK
+        </button>
+
+        <button id="filter-no" class="filter-button" onclick="setFilter('no')">
+          Pokaż tylko NIE
+        </button>
+
+        <button id="filter-neutral" class="filter-button" onclick="setFilter('neutral')">
+          Pokaż tylko NEUTRALNE
+        </button>
+
+        <hr>
+
+        <b>Podsumowanie powierzchni</b><br>
+        TAK: <span id="summary-yes">0.00 ha</span><br>
+        NIE: <span id="summary-no">0.00 ha</span><br>
+        NEUTRALNIE: <span id="summary-neutral">0.00 ha</span><br>
+
+        <hr>
+
+        <button onclick="clearVotes()">
+          Wyczyść głosy
+        </button>
+
+        <button onclick="sendVotesByMail()">
+          Wyślij głosy mailem
+        </button>
+      `;
+
+      return div;
+    };
+
+    filterPanel.addTo(map);
   </script>
 </body>
 </html>
