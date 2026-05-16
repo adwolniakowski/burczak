@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Mapa głosowania</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+    html, body, #map {
+      height: 100%;
+      margin: 0;
+    }
+
+    .trail-label {
+      font-weight: bold;
+      font-size: 12px;
+      background: rgba(255,255,255,0.85);
+      border: 1px solid #666;
+      border-radius: 4px;
+      padding: 2px 4px;
+    }
+
+    .panel {
+      background: white;
+      padding: 10px;
+      border-radius: 6px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.3);
+      font-family: sans-serif;
+      font-size: 13px;
+      min-width: 180px;
+    }
+
+    .legend-item {
+      margin: 4px 0;
+    }
+
+    .box {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    button {
+      margin-top: 4px;
+      width: 100%;
+      padding: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .active-filter {
+      outline: 3px solid #333;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+
+    const GEOJSON_FILE = 'burczak.geojson';
+    const MAIL_TO = 'twoj-email@example.com';
+
+    const map = L.map('map').setView([53.2, 23.3], 11);
+
+    L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }
+    ).addTo(map);
+
+    const votes = {};
+    const layersById = {};
+
+    let currentFilter = 'all';
+
+    const voteColors = {
+      yes: '#2ca25f',
+      no: '#de2d26',
+      neutral: '#777777'
+    };
+
+    function getFeatureId(feature) {
+      return (
+        feature.properties.id ||
+        feature.properties.fid ||
+        feature.properties.name ||
+        crypto.randomUUID()
+      );
+    }
+
+    function getStyle(vote) {
+      return {
+        color: voteColors[vote],
+        fillColor: voteColors[vote],
+        weight: 2,
+        fillOpacity: vote === 'neutral'
+          ? 0.25
+          : 0.45
+      };
+    }
+
+    function updateVisibility() {
+
+      Object.entries(layersById).forEach(([id, layer]) => {
+
+        const vote = votes[id];
+
+        let visible = true;
+
+        if (currentFilter === 'yes') {
+          visible = vote === 'yes';
+        }
+
+        if (currentFilter === 'no') {
+          visible = vote === 'no';
+        }
+
+        if (currentFilter === 'neutral') {
+          visible = vote === 'neutral';
+        }
+
+        if (visible) {
+          if (!map.hasLayer(layer)) {
+            layer.addTo(map);
+          }
+        } else {
+          if (map.hasLayer(layer)) {
+            map.removeLayer(layer);
+          }
+        }
+
+      });
+    }
+
+    function setVote(id, vote) {
+
+      votes[id] = vote;
+
+      const layer = layersById[id];
+
+      if (layer) {
+        layer.setStyle(getStyle(vote));
+      }
+
+      updateVisibility();
+    }
+
+    function setFilter(filter) {
+
+      currentFilter = filter;
+
+      document
+        .querySelectorAll('.filter-button')
+        .forEach(btn => btn.classList.remove('active-filter'));
+
+      const active =
+        document.getElementById('filter-' + filter);
+
+      if (active) {
+        active.classList.add('active-filter');
+      }
+
+      updateVisibility();
+    }
+
+    function buildVotesJson() {
+
+      const result = [];
+
+      Object.entries(votes).forEach(([id, vote]) => {
+
+        const layer = layersById[id];
+
+        if (!layer) return;
+
+        const name =
+          layer.feature.properties.name || id;
+
+        result.push({
+          id: id,
+          name: name,
+          vote: vote
+        });
+
+      });
+
+      return JSON.stringify(result, null, 2);
+    }
+
+    function sendVotesByMail() {
+
+      const subject =
+        encodeURIComponent('Głosy dla tras');
+
+      const body =
+        encodeURIComponent(buildVotesJson());
+
+      window.location.href =
+        `mailto:${MAIL_TO}?subject=${subject}&body=${body}`;
+    }
+
+    fetch(GEOJSON_FILE)
+      .then(response => response.json())
+      .then(data => {
+
+        const geoLayer = L.geoJSON(data, {
+
+          style: feature => getStyle('neutral'),
+
+          onEachFeature: (feature, layer) => {
+
+            const p = feature.properties;
+
+            const id = getFeatureId(feature);
+
+            votes[id] = 'neutral';
+
+            layersById[id] = layer;
+
+            const name =
+              p.name || 'Bez nazwy';
+
+            const length =
+              p.length
+                ? (Number(p.length)/1000).toFixed(3) + ' km'
+                : 'brak danych';
+
+            const area =
+              p.area
+                ? (Number(p.area)/10000).toFixed(2) + ' ha'
+                : 'brak danych';
+
+            const nameLabel = `
+              <b>${name}</b>
+            `;
+
+            const popup = `
+              <b>${name}</b><br>
+              Długość: ${length}<br>
+              Powierzchnia: ${area}<br><br>
+
+              <b>Głos:</b><br>
+
+              <button onclick="setVote('${id}', 'yes')">
+                TAK
+              </button>
+
+              <button onclick="setVote('${id}', 'neutral')">
+                NEUTRALNIE
+              </button>
+
+              <button onclick="setVote('${id}', 'no')">
+                NIE
+              </button>
+            `;
+
+            layer.bindTooltip(nameLabel, {
+              permanent: true,
+              direction: 'center',
+              className: 'trail-label'
+            });
+
+            layer.bindPopup(popup);
+
+            layer.on('mouseover', () => {
+
+              layer.setStyle({
+                weight: 5,
+                fillOpacity: 0.65
+              });
+
+              layer.bringToFront();
+            });
+
+            layer.on('mouseout', () => {
+
+              layer.setStyle(
+                getStyle(votes[id])
+              );
+            });
+
+          }
+
+        }).addTo(map);
+
+        const bounds = geoLayer.getBounds();
+
+        if (bounds.isValid()) {
+          map.fitBounds(bounds);
+        }
+
+      });
+
+    // LEGENDA
+
+    const legend = L.control({
+      position: 'bottomright'
+    });
+
+    legend.onAdd = function () {
+
+      const div = L.DomUtil.create('div', 'panel');
+
+      div.innerHTML = `
+        <b>Legenda</b>
+
+        <div class="legend-item">
+          <span class="box"
+            style="background:${voteColors.yes}">
+          </span>
+          TAK
+        </div>
+
+        <div class="legend-item">
+          <span class="box"
+            style="background:${voteColors.no}">
+          </span>
+          NIE
+        </div>
+
+        <div class="legend-item">
+          <span class="box"
+            style="background:${voteColors.neutral}">
+          </span>
+          NEUTRALNIE
+        </div>
+      `;
+
+      return div;
+    };
+
+    legend.addTo(map);
+
+    // PANEL FILTRÓW
+
+    const filterPanel = L.control({
+      position: 'topright'
+    });
+
+    filterPanel.onAdd = function () {
+
+      const div = L.DomUtil.create('div', 'panel');
+
+      div.innerHTML = `
+        <b>Filtry</b><br>
+
+        <button
+          id="filter-all"
+          class="filter-button active-filter"
+          onclick="setFilter('all')">
+
+          Pokaż wszystkie
+        </button>
+
+        <button
+          id="filter-yes"
+          class="filter-button"
+          onclick="setFilter('yes')">
+
+          Pokaż tylko TAK
+        </button>
+
+        <button
+          id="filter-no"
+          class="filter-button"
+          onclick="setFilter('no')">
+
+          Pokaż tylko NIE
+        </button>
+
+        <button
+          id="filter-neutral"
+          class="filter-button"
+          onclick="setFilter('neutral')">
+
+          Pokaż tylko NEUTRALNE
+        </button>
+
+        <hr>
+
+        <button onclick="sendVotesByMail()">
+          Wyślij głosy mailem
+        </button>
+      `;
+
+      return div;
+    };
+
+    filterPanel.addTo(map);
+
+  </script>
+</body>
+</html>
