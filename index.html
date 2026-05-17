@@ -7,9 +7,90 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
-    html, body, #map {
+    html, body {
       height: 100%;
       margin: 0;
+      font-family: sans-serif;
+    }
+
+    body {
+      display: flex;
+    }
+
+    #sidebar {
+      width: 300px;
+      height: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      overflow-y: auto;
+      background: #ffffff;
+      border-right: 1px solid #ccc;
+      box-shadow: 2px 0 6px rgba(0,0,0,0.15);
+      z-index: 1000;
+    }
+
+    #sidebar h2 {
+      margin: 0 0 8px 0;
+      font-size: 18px;
+    }
+
+    #feature-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .feature-list-item {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #f8f8f8;
+      padding: 8px;
+      text-align: left;
+      cursor: pointer;
+      font-weight: normal;
+      width: 100%;
+      margin: 0;
+      transition: background 0.15s ease, border-color 0.15s ease, outline 0.15s ease;
+    }
+
+    .feature-list-item.vote-yes {
+      background: rgba(44, 162, 95, 0.22);
+      border-color: #2ca25f;
+    }
+
+    .feature-list-item.vote-no {
+      background: rgba(222, 45, 38, 0.22);
+      border-color: #de2d26;
+    }
+
+    .feature-list-item.vote-neutral {
+      background: rgba(119, 119, 119, 0.18);
+      border-color: #777777;
+    }
+
+    .feature-list-item:hover {
+      filter: brightness(0.96);
+    }
+
+    .feature-list-item.active {
+      outline: 3px solid #333;
+    }
+
+    .feature-list-name {
+      font-weight: bold;
+      display: block;
+    }
+
+    .feature-list-meta {
+      color: #555;
+      font-size: 12px;
+      margin-top: 3px;
+      display: block;
+    }
+
+    #map {
+      height: 100%;
+      flex: 1;
     }
 
     .trail-label {
@@ -58,6 +139,14 @@
 </head>
 
 <body>
+  <aside id="sidebar">
+    <h2>Obszary do głosowania</h2>
+    <div style="font-size:12px; line-height:1.4; margin-bottom:10px; color:#555;">
+      Kliknij nazwę, aby przybliżyć obszar i otworzyć dialog głosowania.
+    </div>
+    <div id="feature-list"></div>
+  </aside>
+
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -75,6 +164,7 @@
 
     const votes = {};
     const layersById = {};
+    const listItemsById = {};
     let currentFilter = 'all';
 
     const voteColors = {
@@ -111,6 +201,23 @@
       return n ? (n / 10000).toFixed(2) + ' ha' : 'brak danych';
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function updateListItemVote(id) {
+      const item = listItemsById[id];
+      if (!item) return;
+
+      item.classList.remove('vote-yes', 'vote-no', 'vote-neutral');
+      item.classList.add('vote-' + votes[id]);
+    }
+
     function updateVisibility() {
       Object.entries(layersById).forEach(([id, layer]) => {
         const vote = votes[id];
@@ -127,6 +234,52 @@
           if (map.hasLayer(layer)) map.removeLayer(layer);
         }
       });
+    }
+
+    function setActiveListItem(id) {
+      Object.values(listItemsById).forEach(item => item.classList.remove('active'));
+
+      const item = listItemsById[id];
+      if (item) {
+        item.classList.add('active');
+        item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+
+    function zoomToFeature(id) {
+      const layer = layersById[id];
+      if (!layer) return;
+
+      if (!map.hasLayer(layer)) {
+        setFilter('all');
+      }
+
+      const bounds = layer.getBounds ? layer.getBounds() : null;
+
+      if (bounds && bounds.isValid()) {
+        map.fitBounds(bounds, { maxZoom: 17, padding: [40, 40] });
+      }
+
+      layer.openPopup();
+      setActiveListItem(id);
+    }
+
+    function addFeatureToList(id, name, length, area) {
+      const list = document.getElementById('feature-list');
+      const item = document.createElement('button');
+
+      item.type = 'button';
+      item.className = 'feature-list-item vote-neutral';
+      item.innerHTML = `
+        <span class="feature-list-name">${escapeHtml(name)}</span>
+        <span class="feature-list-meta">Długość: ${escapeHtml(length)} · Powierzchnia: ${escapeHtml(area)}</span>
+      `;
+
+      item.addEventListener('click', () => zoomToFeature(id));
+
+      list.appendChild(item);
+      listItemsById[id] = item;
+      updateListItemVote(id);
     }
 
     function updateSummary() {
@@ -160,6 +313,7 @@
       const layer = layersById[id];
       if (layer) layer.setStyle(getStyle(vote));
 
+      updateListItemVote(id);
       updateVisibility();
       updateSummary();
     }
@@ -170,6 +324,7 @@
 
         const layer = layersById[id];
         if (layer) layer.setStyle(getStyle('neutral'));
+        updateListItemVote(id);
       });
 
       updateVisibility();
@@ -199,24 +354,51 @@
         const p = layer.feature.properties;
 
         result.push({
-          id: id,
-          name: p.name || id,
-          vote: vote,
-          length_m: Number(p.length || 0),
-          area_m2: Number(p.area_m2 || 0)
+          name: p.name,
+          vote: vote
         });
       });
 
       return JSON.stringify(result, null, 2);
     }
+    
+    function buildVotesText() {
+  return Object.entries(votes)
+    .map(([id, vote]) => {
+      const layer = layersById[id];
+      if (!layer) return null;
+
+      const name = layer.feature.properties.name || 'Bez nazwy';
+
+      const label =
+        vote === 'yes' ? 'TAK' :
+        vote === 'no' ? 'NIE' :
+        'NEUTRALNIE';
+
+      return `${name}: ${label}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
 
     function sendVotesByMail() {
+  const votesText = buildVotesText();
+
+  navigator.clipboard.writeText(votesText)
+    .then(() => {
       const subject = encodeURIComponent('Głosy dla tras');
-      const body = encodeURIComponent(buildVotesJson());
+      const body = encodeURIComponent(
+        'Głosy zostały skopiowane do schowka.\n\n' +
+        'Wklej je poniżej skrótem Ctrl+V.'
+      );
 
       window.location.href =
         `mailto:${MAIL_TO}?subject=${subject}&body=${body}`;
-    }
+    })
+    .catch(() => {
+      showVotesDialog();
+    });
+}
 
     fetch(GEOJSON_FILE)
       .then(response => response.json())
@@ -235,22 +417,19 @@
             const length = formatLength(p.length);
             const area = formatArea(p.area_m2);
 
-            const tooltipLabel = `
-              <b>${name}</b><br>
-              Długość: ${length}<br>
-              Powierzchnia: ${area}
-            `;
+            const tooltipLabel = `<b>${escapeHtml(name)}</b>`;
+            const safeId = JSON.stringify(id);
 
             const popup = `
-              <b>${name}</b><br>
-              Długość: ${length}<br>
-              Powierzchnia: ${area}<br><br>
+              <b>${escapeHtml(name)}</b><br>
+              Długość: ${escapeHtml(length)}<br>
+              Powierzchnia: ${escapeHtml(area)}<br><br>
 
               <b>Głos:</b><br>
 
-              <button onclick="setVote('${id}', 'yes')">TAK</button>
-              <button onclick="setVote('${id}', 'neutral')">NEUTRALNIE</button>
-              <button onclick="setVote('${id}', 'no')">NIE</button>
+              <button onclick='setVote(${safeId}, "yes")'>TAK</button>
+              <button onclick='setVote(${safeId}, "neutral")'>NEUTRALNIE</button>
+              <button onclick='setVote(${safeId}, "no")'>NIE</button>
             `;
 
             layer.bindTooltip(tooltipLabel, {
@@ -260,6 +439,16 @@
             });
 
             layer.bindPopup(popup);
+
+            addFeatureToList(id, name, length, area);
+
+            layer.on('click', () => {
+              setActiveListItem(id);
+            });
+
+            layer.on('popupopen', () => {
+              setActiveListItem(id);
+            });
 
             layer.on('mouseover', () => {
               layer.setStyle({
