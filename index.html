@@ -57,18 +57,23 @@
     }
 
     .vote-yes {
-      background: rgba(44, 162, 95, 0.22);
+      background: rgba(44, 162, 95, 0.2);
       border-color: #2ca25f;
     }
 
     .vote-no {
-      background: rgba(222, 45, 38, 0.22);
+      background: rgba(222, 45, 38, 0.2);
       border-color: #de2d26;
     }
 
     .vote-neutral {
-      background: rgba(119, 119, 119, 0.18);
+      background: rgba(119, 119, 119, 0.2);
       border-color: #777;
+    }
+    
+    .vote-discuss {
+      background: rgba(222, 162, 38, 0.2);
+      border-color: #770;
     }
 
     .feature-name {
@@ -181,8 +186,8 @@
       <h2 style="margin:0;">Głosy do skopiowania</h2>
 
       <div style="font-size:13px; color:#555;">
-        Skopiuj poniższą listę i wyślij ją na adres: xyz@mail.com.
-        W przypadku uwag, dopisz je poniżej.
+        Skopiuj poniższą listę i wyślij ją na adres: zlw.dojlidy@gmail.com
+        W przypadku uwag, dopisz je w mailu pod listą głosów.
       </div>
 
       <button onclick="copyVotes()">Kopiuj do schowka</button>
@@ -233,7 +238,8 @@
     const voteColors = {
       yes: '#2ca25f',
       no: '#de2d26',
-      neutral: '#777777'
+      neutral: '#777777',
+      discuss: '#dea226'
     };
 
     function getFeatureId(feature) {
@@ -257,7 +263,7 @@
         color: voteColors[vote],
         fillColor: voteColors[vote],
         weight: 2,
-        fillOpacity: vote === 'neutral' ? 0.25 : 0.45
+        fillOpacity: 0.35 //vote === 'neutral' ? 0.25 : 0.45
       };
     }
 
@@ -283,7 +289,7 @@
     function updateListItemVote(id) {
       const item = listItemsById[id];
       if (!item) return;
-      item.classList.remove('vote-yes', 'vote-no', 'vote-neutral');
+      item.classList.remove('vote-yes', 'vote-no', 'vote-neutral', 'vote-discuss');
       item.classList.add('vote-' + votes[id]);
     }
 
@@ -314,7 +320,7 @@
     }
 
     function updateSummary() {
-      const totals = { yes: 0, no: 0, neutral: 0 };
+      const totals = { yes: 0, no: 0, neutral: 0, discuss: 0 };
 
       Object.entries(votes).forEach(([id, vote]) => {
         const layer = layersById[id];
@@ -329,6 +335,8 @@
         (totals.no / 10000).toFixed(2) + ' ha';
       document.getElementById('summary-neutral').textContent =
         (totals.neutral / 10000).toFixed(2) + ' ha';
+        document.getElementById('summary-discuss').textContent =
+        (totals.discuss / 10000).toFixed(2) + ' ha';
     }
 
     function setVote(id, vote) {
@@ -373,6 +381,7 @@
         if (currentFilter === 'yes') visible = vote === 'yes';
         if (currentFilter === 'no') visible = vote === 'no';
         if (currentFilter === 'neutral') visible = vote === 'neutral';
+        if (currentFilter === 'discuss') visible = vote === 'discuss';
 
         if (visible) {
           if (!map.hasLayer(layer)) layer.addTo(map);
@@ -385,7 +394,8 @@
     function voteToLabel(vote) {
       if (vote === 'yes') return 'TAK';
       if (vote === 'no') return 'NIE';
-      return 'DO DYSKUSJI';
+      if (vote === 'discuss') return 'DO DYSKUSJI';
+      return 'BRAK ZDANIA';
     }
 
     function buildVotesText() {
@@ -485,8 +495,9 @@
               <b>Głos:</b><br>
 
               <button onclick='setVote(${safeId}, "yes")'>TAK</button>
-              <button onclick='setVote(${safeId}, "neutral")'>DO DYSKUSJI</button>
               <button onclick='setVote(${safeId}, "no")'>NIE</button>
+              <button onclick='setVote(${safeId}, "neutral")'>BRAK ZDANIA</button>
+              <button onclick='setVote(${safeId}, "discuss")'>DO DYSKUSJI</button>
             `;
 
             layer.bindPopup(popup);
@@ -549,20 +560,25 @@
           <span class="box" style="background:${voteColors.yes}"></span>
           TAK
         </div>
-
+        
         <div class="legend-item">
           <span class="box" style="background:${voteColors.no}"></span>
           NIE
         </div>
-
+        
         <div class="legend-item">
           <span class="box" style="background:${voteColors.neutral}"></span>
+          BRAK ZDANIA
+        </div>
+
+        <div class="legend-item">
+          <span class="box" style="background:${voteColors.discuss}"></span>
           DO DYSKUSJI
         </div>
 
         <div class="legend-item">
           <span class="box" style="background:#42a5f5"></span>
-          USTALONE
+          USTALONE PRZEZ ND
         </div>
       `;
       return div;
@@ -584,12 +600,16 @@
         <button id="filter-yes" class="filter-button" onclick="setFilter('yes')">
           Pokaż tylko TAK
         </button>
-
+        
         <button id="filter-no" class="filter-button" onclick="setFilter('no')">
           Pokaż tylko NIE
         </button>
-
+        
         <button id="filter-neutral" class="filter-button" onclick="setFilter('neutral')">
+          Pokaż tylko BRAK ZDANIA
+        </button>
+        
+        <button id="filter-discuss" class="filter-button" onclick="setFilter('discuss')">
           Pokaż tylko DO DYSKUSJI
         </button>
 
@@ -598,7 +618,8 @@
         <b>Powierzchnia</b><br>
         TAK: <span id="summary-yes">0.00 ha</span><br>
         NIE: <span id="summary-no">0.00 ha</span><br>
-        DO DYSKUSJI: <span id="summary-neutral">0.00 ha</span><br>
+        BRAK ZDANIA: <span id="summary-neutral">0.00 ha</span><br>
+        DO DYSKUSJI: <span id="summary-discuss">0.00 ha</span><br>
 
         <hr>
 
